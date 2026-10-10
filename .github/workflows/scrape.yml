@@ -2,81 +2,40 @@ name: Check EDJOIN Jobs
 
 on:
   schedule:
-    - cron: "0 */2 * * *"
-
+    - cron: '0 */2 * * *'
   workflow_dispatch:
-
-concurrency:
-  group: edjoin-job-finder
-  cancel-in-progress: false
-
-permissions:
-  contents: write
 
 jobs:
   scrape:
     runs-on: ubuntu-latest
-
+    permissions:
+      contents: write
     steps:
-      - name: Checkout latest main
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
-          ref: main
-          fetch-depth: 1
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.11'
 
-      - name: Install dependencies
+      - name: Install dependencies & Playwright
         run: |
-          python -m pip install --upgrade pip
-          pip install requests beautifulsoup4
+          pip install requests playwright
+          playwright install --with-deps chromium
 
-      - name: Run EDJOIN scraper
+      - name: Run script
+        run: python bot.py
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+
+      - name: Save history
         run: |
-          python bot.py
-
-      - name: Check whether seen_jobs.json changed
-        id: changes
-        run: |
-          if git diff --quiet -- seen_jobs.json; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "No change to seen_jobs.json"
-          else
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "seen_jobs.json changed"
-          fi
-
-      - name: Save seen_jobs.json through GitHub API
-        if: steps.changes.outputs.changed == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -e
-
-          echo "Reading current seen_jobs.json SHA from GitHub..."
-
-          SHA=$(gh api \
-            "repos/${GITHUB_REPOSITORY}/contents/seen_jobs.json?ref=main" \
-            --jq '.sha')
-
-          echo "Encoding new seen_jobs.json..."
-
-          CONTENT=$(base64 -w 0 seen_jobs.json)
-
-          echo "Updating seen_jobs.json directly..."
-
-          gh api \
-            --method PUT \
-            "repos/${GITHUB_REPOSITORY}/contents/seen_jobs.json" \
-            -f message="Update seen jobs" \
-            -f content="$CONTENT" \
-            -f sha="$SHA" \
-            -f branch="main"
-
-          echo "seen_jobs.json successfully updated."
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git rebase origin/main
+          git add seen_jobs.json
+          git diff --quiet && git diff --staged --quiet || git commit -m "Update seen jobs database"
+          git push origin main
