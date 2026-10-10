@@ -8,20 +8,25 @@ from playwright.sync_api import sync_playwright
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 DB_FILE = "seen_jobs.json"
 
-# 1. Science Teaching Roles (High School / Secondary)
+# 1. Science Teaching Roles (Natural & Physical Sciences only)
 SCIENCE_KEYWORDS = [
     "biology", "bio", "chemistry", "chem",
     "environmental science", "apes", "life science", 
     "physical science", "science teacher"
 ]
 
-# 2. Strictly Principal / Vice Principal / Assistant Principal
+# 2. Administrative Roles
 ADMIN_KEYWORDS = [
     "principal", "vice principal", "assistant principal"
 ]
 
-# Exclude elementary/middle-only contexts unless high school is explicitly present
-EXCLUDE_KEYWORDS = ["elementary", "k-5", "k-6", "middle school", "kindergarten", "preschool"]
+# Excluded subjects and levels
+# Explicitly strips out Social Science, Social Studies, and non-secondary levels
+EXCLUDE_KEYWORDS = [
+    "social science", "social sciences", "social studies",
+    "history", "civics", "government", "economics", "sociology",
+    "elementary", "k-5", "k-6", "middle school", "kindergarten", "preschool"
+]
 
 # High School & Unified Districts along the SF to San Jose corridor
 DISTRICT_URLS = [
@@ -55,17 +60,23 @@ def save_seen(seen_ids):
 def is_match(title):
     t = title.lower()
 
-    # Match Science Teaching
+    # Immediate drop if it references social science/studies, history, etc.
+    if any(ex in t for ex in EXCLUDE_KEYWORDS):
+        # Allow pass-through only if it's an admin role at a middle school (if desired),
+        # but completely block anything containing social science/studies
+        if any(ss in t for ss in ["social science", "social sciences", "social studies", "history", "civics", "economics"]):
+            return False
+        # For grade-level exclusions (k-5, middle school, etc.), check if high school is specified
+        if "high school" not in t:
+            return False
+
+    # Match Natural/Physical Science
     is_science = any(re.search(r"\b" + re.escape(kw) + r"\b", t) for kw in SCIENCE_KEYWORDS)
 
-    # Match Strictly Principal / Vice Principal / Assistant Principal
+    # Match Principal / Vice Principal
     is_admin = any(re.search(r"\b" + re.escape(kw) + r"\b", t) for kw in ADMIN_KEYWORDS)
 
     if not (is_science or is_admin):
-        return False
-
-    # Exclude elementary/middle-specific postings unless high school is specified
-    if any(ex in t for ex in EXCLUDE_KEYWORDS) and "high school" not in t:
         return False
 
     role_type = "🔬 Science" if is_science else "🏛️ Principal / Vice Principal"
