@@ -51,56 +51,36 @@ def is_match(title):
 
     return True
 
-def get_san_mateo_district_urls():
-    """
-    Scrapes EDJOIN's Region/County directory to find all authentic
-    district job URLs under San Mateo County.
-    """
-    district_urls = set()
-    
-    # Direct EDJOIN vanity/county portal for San Mateo
-    county_portal_urls = [
-        "https://www.edjoin.org/sequhsd",  # Verified Sequoia Union High School District
-        "https://www.edjoin.org/pausd",    # Palo Alto Unified (Next to 94025)
-    ]
-    for url in county_portal_urls:
-        district_urls.add(url)
-
-    # Let's inspect EDJOIN's Region list page for San Mateo
-    region_urls = [
-        "https://www.edjoin.org/Home/RegionDistricts?regionID=41",
-        "https://www.edjoin.org/Home/DistrictsInCounty?county=San%20Mateo"
-    ]
-
-    for r_url in region_urls:
-        try:
-            res = requests.get(r_url, headers=HEADERS, timeout=12)
-            if res.status_code == 200:
-                soup = BeautifulSoup(res.text, "html.parser")
-                # Collect all district links listed on the county page
-                for a in soup.select("a[href]"):
-                    href = a.get("href", "")
-                    text = a.get_text(strip=True).lower()
-                    
-                    # Match links that point to districts or EDJOIN district portals
-                    if any(term in text for term in ["union high", "unified", "sequoia", "san mateo", "jefferson", "cabrillo"]):
-                        full_link = f"https://www.edjoin.org{href}" if href.startswith("/") else href
-                        district_urls.add(full_link)
-        except Exception as e:
-            print(f"Error fetching directory {r_url}: {e}")
-
-    return list(district_urls)
+# Every target district page with catID=0 (All Categories)
+DISTRICT_PAGES = [
+    # Sequoia Union High (Menlo Park / Redwood City) - catID=0 for all categories
+    "https://www.edjoin.org/sequhsd?catID=0",
+    # San Mateo Union High (San Mateo / Burlingame)
+    "https://www.edjoin.org/Home/Jobs?districtID=784&catID=0",
+    # Palo Alto Unified (directly borders 94025)
+    "https://www.edjoin.org/pausd?catID=0",
+    # Mountain View - Los Altos High
+    "https://www.edjoin.org/mvla?catID=0",
+    # Fremont Union High (Sunnyvale / Cupertino)
+    "https://www.edjoin.org/fuhsd?catID=0",
+    # Jefferson Union High (Daly City / Pacifica)
+    "https://www.edjoin.org/juhsd?catID=0",
+    # Cabrillo Unified (Coastside)
+    "https://www.edjoin.org/cabrillo?catID=0",
+    # South San Francisco Unified
+    "https://www.edjoin.org/ssfusd?catID=0",
+    # San Mateo County Office of Education
+    "https://www.edjoin.org/smcoe?catID=0"
+]
 
 def scrape_districts():
     seen_ids = load_seen()
     new_jobs = []
 
-    district_urls = get_san_mateo_district_urls()
-    print(f"Scanning {len(district_urls)} district pages: {district_urls}")
+    print(f"Checking {len(DISTRICT_PAGES)} districts with catID=0 (all job categories)...")
 
-    for district_url in district_urls:
+    for district_url in DISTRICT_PAGES:
         try:
-            print(f"Checking: {district_url}")
             r = requests.get(district_url, headers=HEADERS, timeout=12)
             if r.status_code != 200:
                 print(f"Skipping {district_url} - status {r.status_code}")
@@ -108,7 +88,7 @@ def scrape_districts():
 
             soup = BeautifulSoup(r.text, "html.parser")
             
-            # Find district name from page header
+            # Extract district name
             d_header = soup.find("h1") or soup.find("title")
             district_name = d_header.get_text(strip=True) if d_header else "District"
             district_name = re.sub(r"EDJOIN.*", "", district_name).strip()
@@ -149,7 +129,7 @@ def scrape_districts():
             "embeds": [{
                 "title": f"📋 {job['title']}",
                 "url": job["url"],
-                "description": f"🏫 **District:** {job['district']}",
+                "description": f"🏫 **District:** {job['district']}\n🏷️ **Category:** Any / All Categories",
                 "color": 3066993
             }]
         }
