@@ -9,16 +9,21 @@ from urllib.parse import urljoin
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 DB_FILE = "seen_jobs.json"
 
+# Broader science keywords
 TEACHING_KEYWORDS = [
     "biology", "bio", "chemistry", "chem",
-    "environmental science", "apes", "life science", "physical science", "science"
+    "environmental science", "apes", "life science", 
+    "physical science", "science"
 ]
 
+# Broader aide / assistant keywords
 AIDE_KEYWORDS = [
     "aide", "instructional assistant", "paraeducator", 
-    "paraprofessional", "lab tech", "science tech"
+    "paraprofessional", "instructional aide", "lab tech", 
+    "science tech", "classroom assistant"
 ]
 
+# Exclude elementary-specific positions unless high school is explicitly stated
 EXCLUDE_KEYWORDS = ["elementary", "k-5", "k-6", "kindergarten", "preschool"]
 
 HEADERS = {
@@ -39,29 +44,24 @@ def save_seen(seen_ids):
     with open(DB_FILE, "w") as f:
         json.dump(list(seen_ids), f, indent=2)
 
-def is_match(title):
-    t = title.lower()
-    has_science = any(re.search(r"\b" + re.escape(kw) + r"\b", t) for kw in TEACHING_KEYWORDS)
-    has_aide = any(re.search(r"\b" + re.escape(kw) + r"\b", t) for kw in AIDE_KEYWORDS)
+def is_match(title, text=""):
+    combined = f"{title} {text}".lower()
+
+    has_science = any(re.search(r"\b" + re.escape(kw) + r"\b", combined) for kw in TEACHING_KEYWORDS)
+    has_aide = any(re.search(r"\b" + re.escape(kw) + r"\b", combined) for kw in AIDE_KEYWORDS)
 
     if not (has_science or has_aide):
         return False
 
-    if any(ex in t for ex in EXCLUDE_KEYWORDS) and "high school" not in t:
+    if any(ex in combined for ex in EXCLUDE_KEYWORDS) and "high school" not in combined:
         return False
 
     return True
 
 def auto_discover_district_urls():
-    """
-    Crawls EDJOIN's county landing pages for San Mateo and Santa Clara
-    to dynamically find every authentic district link.
-    """
     county_directory_urls = [
-        # San Mateo County Region Index
         "https://www.edjoin.org/Home/RegionDistricts?countyID=41",
         "https://www.edjoin.org/Home/DistrictsInCounty?county=San%20Mateo",
-        # Santa Clara County Region Index (Down to San Jose)
         "https://www.edjoin.org/Home/RegionDistricts?countyID=43",
         "https://www.edjoin.org/Home/DistrictsInCounty?county=Santa%20Clara"
     ]
@@ -79,24 +79,17 @@ def auto_discover_district_urls():
 
             soup = BeautifulSoup(resp.text, "html.parser")
 
-            # Look for all links that point to districts or employer portals
             for a in soup.find_all("a", href=True):
                 href = a["href"].strip()
-                text = a.get_text(strip=True)
-
-                # Skip blank, anchors, or search utility buttons
                 if not href or href.startswith("#") or "javascript:" in href:
                     continue
 
-                # Pattern matching EDJOIN's district links
                 is_district_link = any([
                     "districtID=" in href,
                     "/Home/DistrictJobPosting/" in href,
                     "/Home/Jobs?districtID=" in href,
-                    "/Home/Jobs?countyID=" in href and "district" in href.lower()
                 ])
 
-                # Check if it's a vanity profile link (e.g., /sequhsd, /pausd)
                 is_named_slug = (
                     href.startswith("/") 
                     and not any(x in href for x in ["Home", "Account", "Help", "Faq", "Search", "api"]) 
@@ -106,7 +99,6 @@ def auto_discover_district_urls():
 
                 if is_district_link or is_named_slug:
                     clean_link = urljoin(base_url, href)
-                    # Enforce category=0 (all jobs: aide, certificated, classified)
                     separator = "&" if "?" in clean_link else "?"
                     final_link = f"{clean_link}{separator}catID=0"
                     discovered.add(final_link)
@@ -114,17 +106,16 @@ def auto_discover_district_urls():
         except Exception as e:
             print(f"Error checking directory {portal_url}: {e}")
 
-    # Explicit fallback seeds for the primary West Coast corridor high school districts
-    # in case EDJOIN's directory page is rendered via JS tables
+    # Primary high school / unified districts in the SF-to-SJ corridor
     seed_districts = [
-        "https://www.edjoin.org/sequhsd?catID=0",       # Sequoia Union High (Menlo Park 94025)
+        "https://www.edjoin.org/sequhsd?catID=0",       # Sequoia Union High (Menlo Park / 94025)
         "https://www.edjoin.org/pausd?catID=0",         # Palo Alto Unified
         "https://www.edjoin.org/mvla?catID=0",          # Mountain View-Los Altos High
         "https://www.edjoin.org/fuhsd?catID=0",         # Fremont Union High (Sunnyvale/Cupertino)
         "https://www.edjoin.org/juhsd?catID=0",         # Jefferson Union High (Daly City/Pacifica)
         "https://www.edjoin.org/cabrillo?catID=0",      # Cabrillo Unified (Coastside)
         "https://www.edjoin.org/ssfusd?catID=0",        # South San Francisco Unified
-        "https://www.edjoin.org/smcoe?catID=0",         # San Mateo County Office of Education
+        "https://www.edjoin.org/smcoe?catID=0",         # San Mateo County Office of Ed
         "https://www.edjoin.org/sjusd?catID=0",         # San Jose Unified
         "https://www.edjoin.org/esuhsd?catID=0",        # East Side Union High (San Jose)
         "https://www.edjoin.org/cuhsd?catID=0"          # Campbell Union High (West SJ)
@@ -148,12 +139,10 @@ def scrape_all():
 
             soup = BeautifulSoup(resp.text, "html.parser")
 
-            # Extract district name
             h_tag = soup.find(["h1", "h2", "title"])
             d_name = h_tag.get_text(strip=True) if h_tag else "Peninsula District"
             d_name = re.sub(r"EDJOIN.*", "", d_name).strip() or "Peninsula School District"
 
-            # Parse all job links posted by this district
             job_links = soup.select("a[href*='JobPosting'], a[href*='jobPosting']")
 
             for a in job_links:
@@ -169,7 +158,10 @@ def scrape_all():
                 if jid in seen_ids:
                     continue
 
-                if is_match(title):
+                # Inspect surrounding card text if available
+                parent_text = a.parent.get_text(" ", strip=True) if a.parent else ""
+
+                if is_match(title, parent_text):
                     full_url = urljoin("https://www.edjoin.org", href)
                     seen_ids.add(jid)
                     new_jobs.append({
@@ -183,7 +175,7 @@ def scrape_all():
         except Exception as e:
             print(f"Skipping {district_url} due to error: {e}")
 
-    # Send alerts to Discord
+    # Dispatch alerts to Discord
     for job in new_jobs:
         payload = {
             "embeds": [{
@@ -201,4 +193,3 @@ def scrape_all():
 
 if __name__ == "__main__":
     scrape_all()
-    scrape_districts()
