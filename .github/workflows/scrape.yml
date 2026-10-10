@@ -34,8 +34,7 @@ jobs:
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git fetch origin main
-          git rebase origin/main
           git add seen_jobs.json
-          git diff --quiet && git diff --staged --quiet || git commit -m "Update seen jobs database"
+          git diff --staged --quiet || git commit -m "Update seen jobs database"
+          git pull --rebase origin main
           git push origin main
