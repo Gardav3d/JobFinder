@@ -1,24 +1,28 @@
 import json
 import os
 import re
+import time
 import requests
+from bs4 import BeautifulSoup
 
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 DB_FILE = "seen_jobs.json"
 
-# Science keywords for your father
-TARGET_KEYWORDS = [
+TEACHING_KEYWORDS = [
     "biology", "bio", "chemistry", "chem",
-    "environmental science", "apes", "life science", "physical science", "math"
+    "environmental science", "apes", "life science", "physical science", "science"
 ]
 
-# Ensure it's secondary / high school
-EXCLUDE_KEYWORDS = ["elementary", "k-5", "k-6", "middle school", "grade 6", "grade 7", "grade 8"]
+AIDE_KEYWORDS = [
+    "aide", "instructional assistant", "paraeducator", 
+    "paraprofessional", "lab tech", "science tech"
+]
+
+EXCLUDE_KEYWORDS = ["elementary", "k-5", "k-6", "kindergarten", "preschool"]
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Accept": "application/json, text/plain, */*",
-    "Referer": "https://www.edjoin.org/"
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 }
 
 def load_seen():
@@ -34,108 +38,100 @@ def save_seen(seen_ids):
     with open(DB_FILE, "w") as f:
         json.dump(list(seen_ids), f, indent=2)
 
-def is_match(title, description=""):
-    combined = f"{title} {description}".lower()
-    
-    # Must match at least one science subject
-    has_subject = any(re.search(r"\b" + re.escape(kw) + r"\b", combined) for kw in TARGET_KEYWORDS)
-    if not has_subject:
-        return False
-        
-    # Skip obvious elementary / middle school postings if present
-    is_excluded = any(ex in combined for ex in EXCLUDE_KEYWORDS) and "high school" not in combined
-    return not is_excluded
+def is_match(title):
+    t = title.lower()
+    has_science = any(re.search(r"\b" + re.escape(kw) + r"\b", t) for kw in TEACHING_KEYWORDS)
+    has_aide = any(re.search(r"\b" + re.escape(kw) + r"\b", t) for kw in AIDE_KEYWORDS)
 
-def scrape_region():
+    if not (has_science or has_aide):
+        return False
+
+    if any(ex in t for ex in EXCLUDE_KEYWORDS) and "high school" not in t:
+        return False
+
+    return True
+
+# Named EDJOIN vanity portal URLs for districts on the Peninsula
+DISTRICT_PAGES = [
+    # San Mateo County (High Schools & Unified)
+    "https://www.edjoin.org/sequhsd",         # Sequoia Union High School District (Menlo Park / Redwood City / San Carlos)
+    "https://www.edjoin.org/smuhsd",      # San Mateo Union High School District (San Mateo / Burlingame / Aragon / Hillsdale)
+    "https://www.edjoin.org/juhsd",       # Jefferson Union High School District (Daly City / Pacifica)
+    "https://www.edjoin.org/cabrillo",    # Cabrillo Unified (Half Moon Bay / Coastside)
+    "https://www.edjoin.org/ssfusd",      # South San Francisco Unified
+    "https://www.edjoin.org/smcoe",       # San Mateo County Office of Education
+
+    # Immediate Neighbors (Bordering 94025 / Silicon Valley)
+    "https://www.edjoin.org/pausd",       # Palo Alto Unified (Directly adjacent to Menlo Park 94025)
+    "https://www.edjoin.org/mvla",        # Mountain View-Los Altos High School District
+    "https://www.edjoin.org/fuhsd",       # Fremont Union High School District (Cupertino / Sunnyvale)
+]
+
+def scrape_districts():
     seen_ids = load_seen()
     new_jobs = []
 
-    # EDJOIN California County Search:
-    # San Mateo County is regionID=41 (or county name "San Mateo")
-    # catID=1 specifies Certificated teaching positions
-    search_urls = [
-        # San Mateo County (All districts)
-        "https://www.edjoin.org/Home/Jobs?regionID=41&catID=1&sort=postingDate&order=DESC",
-        # Santa Clara County (North county borders San Mateo)
-        "https://www.edjoin.org/Home/Jobs?regionID=43&catID=1&sort=postingDate&order=DESC"
-    ]
+    print(f"Checking {len(DISTRICT_PAGES)} targeted Peninsula districts...")
 
-    from bs4 import BeautifulSoup
-
-    for url in search_urls:
-        county_name = "San Mateo" if "regionID=41" in url else "Santa Clara"
-        print(f"Scanning {county_name} County districts...")
-
+    for district_url in DISTRICT_PAGES:
         try:
-            r = requests.get(url, headers=HEADERS, timeout=15)
-        except Exception as e:
-            print(f"Failed to fetch {county_name}: {e}")
-            continue
+            r = requests.get(district_url, headers=HEADERS, timeout=12)
+            if r.status_code != 200:
+                print(f"Skipping {district_url} (status: {r.status_code})")
+                continue
 
-        soup = BeautifulSoup(r.text, "html.parser")
-        
-        # Pull cards or links
-        cards = soup.select(".job-list-item, .search-result, .row.item, tr")
-        
-        # Fallback to direct job links if list items aren't wrapped in standard card classes
-        if not cards:
-            links = soup.select("a[href*='JobPosting'], a[href*='DistrictJobPosting']")
-            for a in links:
+            soup = BeautifulSoup(r.text, "html.parser")
+            
+            # Extract district name from header
+            district_name = soup.find("h1") or soup.find("title")
+            d_name = district_name.get_text(strip=True) if district_name else "Peninsula District"
+            d_name = re.sub(r"EDJOIN.*", "", d_name).strip()
+
+            # Find all job links on this district's portal
+            job_links = soup.select("a[href*='JobPosting'], a[href*='jobPosting']")
+
+            for a in job_links:
                 title = a.get_text(strip=True)
                 href = a.get("href", "")
-                job_id = re.search(r"\d{5,}", href)
-                jid = job_id.group(0) if job_id else href
 
-                if jid not in seen_ids and is_match(title):
+                if not title or len(title) < 4:
+                    continue
+
+                id_match = re.search(r"\d{5,}", href)
+                jid = id_match.group(0) if id_match else href
+
+                if jid in seen_ids:
+                    continue
+
+                if is_match(title):
                     full_url = f"https://www.edjoin.org{href}" if href.startswith("/") else href
                     seen_ids.add(jid)
                     new_jobs.append({
                         "title": title,
-                        "district": f"{county_name} County District",
+                        "district": d_name,
                         "url": full_url
                     })
-            continue
 
-        for card in cards:
-            link = card.select_one("a[href*='JobPosting'], a[href*='DistrictJobPosting']")
-            if not link:
-                continue
+            time.sleep(0.5)
 
-            href = link.get("href", "")
-            title = link.get_text(strip=True)
-            text = card.get_text(" ", strip=True)
+        except Exception as e:
+            print(f"Error checking {district_url}: {e}")
 
-            job_id_match = re.search(r"\d{5,}", href)
-            jid = job_id_match.group(0) if job_id_match else href
-
-            if jid in seen_ids:
-                continue
-
-            if is_match(title, text):
-                full_url = f"https://www.edjoin.org{href}" if href.startswith("/") else href
-                seen_ids.add(jid)
-                new_jobs.append({
-                    "title": title,
-                    "district": f"{county_name} County",
-                    "url": full_url,
-                    "details": text[:200]
-                })
-
-    # Dispatch to Discord
+    # Dispatch alerts to Discord
     for job in new_jobs:
         payload = {
             "embeds": [{
-                "title": f"🔬 {job['title']}",
+                "title": f"📋 {job['title']}",
                 "url": job["url"],
-                "description": f"**Region:** {job['district']}\n{job.get('details', '')}",
+                "description": f"🏫 **District:** {job['district']}",
                 "color": 3066993
             }]
         }
         requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=10)
-        print(f"Notified: {job['title']}")
+        print(f"Alert sent: {job['title']} ({job['district']})")
 
     save_seen(seen_ids)
-    print(f"County scan complete. Sent {len(new_jobs)} new notifications.")
+    print(f"Scan finished. Sent {len(new_jobs)} alerts.")
 
 if __name__ == "__main__":
-    scrape_region()
+    scrape_districts()
