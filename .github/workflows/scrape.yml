@@ -2,13 +2,15 @@ name: Check EDJOIN Jobs
 
 on:
   schedule:
-    # Runs every 2 hours between 6 AM and 8 PM Pacific Time
-    - cron: '0 14-23/2,0-4/2 * * *'
+    # Runs every 2 hours
+    - cron: '0 */2 * * *'
   workflow_dispatch: # Allows manual trigger
 
 jobs:
   scrape:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # Needed to save seen_jobs.json back to the repo
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python
@@ -19,10 +21,11 @@ jobs:
       - run: python bot.py
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-      - name: Commit seen jobs
+      - name: Save history
         run: |
-          git config --global user.name "edjoin-bot"
-          git config --global user.email "bot@github.com"
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git pull --rebase origin main
           git add seen_jobs.json
-          git commit -m "Update seen jobs" || exit 0
-          git push
+          git commit -m "Update seen jobs database" || exit 0
+          git push origin main
