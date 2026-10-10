@@ -5,7 +5,7 @@ import requests
 from bs4 import BeautifulSoup
 
 # Replace with your Discord Webhook URL (Server Settings -> Integrations -> Webhooks)
-DISCORD_WEBHOOK_URL = "YOUR_DISCORD_WEBHOOK_URL_HERE"
+DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1558366276420632637/mp89vOH9pXPTPhA3E8-5zpy4oVirjPoqpKP1IciQxGZmwKmmOhKf0lPoMD2-hkZuhp9P"
 DB_FILE = "seen_jobs.json"
 
 # Subjects to match
