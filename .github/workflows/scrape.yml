@@ -2,7 +2,7 @@ name: Check EDJOIN Jobs
 
 on:
   schedule:
-    - cron: '*/10 14-23 * * 1-5'
+    - cron: '*/15 * * * *'
   workflow_dispatch:
 
 jobs:
