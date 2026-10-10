@@ -27,8 +27,12 @@ jobs:
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
 
-      - name: Commit seen jobs
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "Update seen jobs database"
-          file_pattern: "seen_jobs.json"
+      - name: Save history
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git rebase origin/main
+          git add seen_jobs.json
+          git diff --quiet && git diff --staged --quiet || git commit -m "Update seen jobs database"
+          git push origin main
