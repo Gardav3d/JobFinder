@@ -15,13 +15,6 @@ TEACHING_KEYWORDS = [
     "physical science", "science"
 ]
 
-# Aide and paraprofessional roles
-AIDE_KEYWORDS = [
-    "aide", "instructional", "associate", 
-    "paraeducator", "para educator", "paraprofessional", 
-    "lab tech", "science tech", "supervision"
-]
-
 # Key target districts covering Menlo Park (94025), San Mateo County, and North Santa Clara
 DISTRICT_URLS = [
     ("Sequoia Union High School District (Menlo Park 94025)", "https://www.edjoin.org/sequhsd"),
