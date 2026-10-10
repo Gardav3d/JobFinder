@@ -5,6 +5,7 @@ import requests
 from urllib.parse import urljoin
 from playwright.sync_api import sync_playwright
 
+STATUS_WEBHOOK_URL = os.environ.get("STATUS_WEBHOOK_URL")
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 DB_FILE = "seen_jobs.json"
 
