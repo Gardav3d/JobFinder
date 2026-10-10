@@ -9,7 +9,7 @@ DB_FILE = "seen_jobs.json"
 
 TARGET_KEYWORDS = [
     "biology", "bio", "chemistry", "chem",
-    "environmental science", "apes", "science"
+    "environmental science", "apes", "science", "aid"
 ]
 
 HEADERS = {
