@@ -8,27 +8,35 @@ from playwright.sync_api import sync_playwright
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 DB_FILE = "seen_jobs.json"
 
-# Science and teaching roles
-TEACHING_KEYWORDS = [
+# 1. Science Teaching Roles (High School / Secondary)
+SCIENCE_KEYWORDS = [
     "biology", "bio", "chemistry", "chem",
     "environmental science", "apes", "life science", 
-    "physical science", "science"
+    "physical science", "science teacher"
 ]
 
-# Key target districts covering Menlo Park (94025), San Mateo County, and North Santa Clara
+# 2. Strictly Principal / Vice Principal / Assistant Principal
+ADMIN_KEYWORDS = [
+    "principal", "vice principal", "assistant principal"
+]
+
+# Exclude elementary/middle-only contexts unless high school is explicitly present
+EXCLUDE_KEYWORDS = ["elementary", "k-5", "k-6", "middle school", "kindergarten", "preschool"]
+
+# High School & Unified Districts along the SF to San Jose corridor
 DISTRICT_URLS = [
     ("Sequoia Union High School District (Menlo Park 94025)", "https://www.edjoin.org/sequhsd"),
     ("San Mateo Union High School District", "https://www.edjoin.org/SanMateoUnion"),
     ("Palo Alto Unified School District", "https://www.edjoin.org/pausd"),
     ("Mountain View-Los Altos High School District", "https://www.edjoin.org/mvla"),
     ("Fremont Union High School District", "https://www.edjoin.org/fuhsd"),
-    ("San Mateo-Foster City School District", "https://www.edjoin.org/SanMateoFoster"),
-    ("Redwood City School District", "https://www.edjoin.org/rcsd"),
-    ("Belmont-Redwood Shores School District", "https://www.edjoin.org/brssd"),
-    ("Menlo Park City School District", "https://www.edjoin.org/mpcsd"),
     ("Jefferson Union High School District", "https://www.edjoin.org/juhsd"),
     ("Cabrillo Unified School District", "https://www.edjoin.org/cabrillo"),
+    ("South San Francisco Unified", "https://www.edjoin.org/ssfusd"),
     ("San Mateo County Office of Education", "https://www.edjoin.org/SMCOE"),
+    ("Campbell Union High School District", "https://www.edjoin.org/cuhsd"),
+    ("East Side Union High School District", "https://www.edjoin.org/esuhsd"),
+    ("San Jose Unified School District", "https://www.edjoin.org/sjusd")
 ]
 
 def load_seen():
@@ -46,13 +54,22 @@ def save_seen(seen_ids):
 
 def is_match(title):
     t = title.lower()
-    for kw in TEACHING_KEYWORDS:
-        if re.search(r"\b" + re.escape(kw) + r"\b", t):
-            return True
-    for kw in AIDE_KEYWORDS:
-        if kw in t:
-            return True
-    return False
+
+    # Match Science Teaching
+    is_science = any(re.search(r"\b" + re.escape(kw) + r"\b", t) for kw in SCIENCE_KEYWORDS)
+
+    # Match Strictly Principal / Vice Principal / Assistant Principal
+    is_admin = any(re.search(r"\b" + re.escape(kw) + r"\b", t) for kw in ADMIN_KEYWORDS)
+
+    if not (is_science or is_admin):
+        return False
+
+    # Exclude elementary/middle-specific postings unless high school is specified
+    if any(ex in t for ex in EXCLUDE_KEYWORDS) and "high school" not in t:
+        return False
+
+    role_type = "🔬 Science" if is_science else "🏛️ Principal / Vice Principal"
+    return role_type
 
 def run_scraper():
     seen_ids = load_seen()
@@ -69,11 +86,8 @@ def run_scraper():
             print(f"Opening: {district_name}...")
             try:
                 page.goto(url, wait_until="networkidle", timeout=30000)
-                
-                # Give dynamic rows a brief moment to finish populating
                 page.wait_for_timeout(2000)
 
-                # Locate all links pointing to JobPostings
                 job_elements = page.locator("a[href*='JobPosting'], a[href*='jobPosting']").all()
                 print(f"[{district_name}] Rendered {len(job_elements)} job links.")
 
@@ -84,22 +98,23 @@ def run_scraper():
                     if not title or len(title) < 4:
                         continue
 
-                    # Extract the unique numerical Job ID
                     id_match = re.search(r"\d{5,}", href)
                     jid = id_match.group(0) if id_match else href
 
                     if jid in seen_ids:
                         continue
 
-                    if is_match(title):
+                    match_type = is_match(title)
+                    if match_type:
                         full_url = urljoin("https://www.edjoin.org", href)
                         seen_ids.add(jid)
                         new_jobs.append({
                             "title": title,
                             "district": district_name,
-                            "url": full_url
+                            "url": full_url,
+                            "type": match_type
                         })
-                        print(f"--> MATCH FOUND: {title}")
+                        print(f"--> MATCH FOUND ({match_type}): {title}")
 
             except Exception as e:
                 print(f"Failed to process {district_name}: {e}")
@@ -110,10 +125,10 @@ def run_scraper():
     for job in new_jobs:
         payload = {
             "embeds": [{
-                "title": f"📋 {job['title']}",
+                "title": f"{job['type']}: {job['title']}",
                 "url": job["url"],
                 "description": f"🏫 **District:** {job['district']}",
-                "color": 3066993
+                "color": 3447003 if "Science" in job["type"] else 15844367
             }]
         }
         try:
