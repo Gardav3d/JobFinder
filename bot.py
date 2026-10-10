@@ -1,12 +1,15 @@
 import json
 import os
 import re
+from datetime import datetime
 import requests
 from urllib.parse import urljoin
 from playwright.sync_api import sync_playwright
 
-STATUS_WEBHOOK_URL = os.environ.get("STATUS_WEBHOOK_URL")
+# Webhook credentials provided via GitHub Secrets
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
+STATUS_WEBHOOK_URL = os.environ.get("STATUS_WEBHOOK_URL")
+
 DB_FILE = "seen_jobs.json"
 
 # 1. Science Teaching Roles (Natural & Physical Sciences only)
@@ -21,15 +24,14 @@ ADMIN_KEYWORDS = [
     "principal", "vice principal", "assistant principal"
 ]
 
-# Excluded subjects and levels
-# Explicitly strips out Social Science, Social Studies, and non-secondary levels
+# 3. Explicit Exclusions (Drops social sciences and elementary/middle levels)
 EXCLUDE_KEYWORDS = [
     "social science", "social sciences", "social studies",
     "history", "civics", "government", "economics", "sociology",
     "elementary", "k-5", "k-6", "middle school", "kindergarten", "preschool"
 ]
 
-# High School & Unified Districts along the SF to San Jose corridor
+# Verified high school & unified districts along the Peninsula / Silicon Valley corridor
 DISTRICT_URLS = [
     ("Sequoia Union High School District (Menlo Park 94025)", "https://www.edjoin.org/sequhsd"),
     ("San Mateo Union High School District", "https://www.edjoin.org/SanMateoUnion"),
@@ -61,27 +63,41 @@ def save_seen(seen_ids):
 def is_match(title):
     t = title.lower()
 
-    # Immediate drop if it references social science/studies, history, etc.
-    if any(ex in t for ex in EXCLUDE_KEYWORDS):
-        # Allow pass-through only if it's an admin role at a middle school (if desired),
-        # but completely block anything containing social science/studies
-        if any(ss in t for ss in ["social science", "social sciences", "social studies", "history", "civics", "economics"]):
-            return False
-        # For grade-level exclusions (k-5, middle school, etc.), check if high school is specified
-        if "high school" not in t:
-            return False
+    # Drop immediately if any social studies or social science terms are present
+    social_terms = ["social science", "social sciences", "social studies", "history", "civics", "economics", "sociology"]
+    if any(term in t for term in social_terms):
+        return False
 
-    # Match Natural/Physical Science
+    # Check remaining generic exclusions (e.g., middle school/elementary)
+    if any(ex in t for ex in EXCLUDE_KEYWORDS) and "high school" not in t:
+        return False
+
+    # Check natural/physical science
     is_science = any(re.search(r"\b" + re.escape(kw) + r"\b", t) for kw in SCIENCE_KEYWORDS)
 
-    # Match Principal / Vice Principal
+    # Check administrative positions
     is_admin = any(re.search(r"\b" + re.escape(kw) + r"\b", t) for kw in ADMIN_KEYWORDS)
 
     if not (is_science or is_admin):
         return False
 
-    role_type = "🔬 Science" if is_science else "🏛️ Principal / Vice Principal"
-    return role_type
+    return "🔬 Science" if is_science else "🏛️ Principal / Vice Principal"
+
+def send_heartbeat(jobs_found_count=0):
+    """Sends a keep-alive message to the dedicated status channel."""
+    if not STATUS_WEBHOOK_URL:
+        print("STATUS_WEBHOOK_URL not configured. Skipping heartbeat.")
+        return
+
+    timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+    payload = {
+        "content": f"🟢 **I'm still here!** EDJOIN check completed at `{timestamp}`. Matched jobs: **{jobs_found_count}**"
+    }
+    try:
+        resp = requests.post(STATUS_WEBHOOK_URL, json=payload, timeout=10)
+        print(f"Heartbeat sent (Status: {resp.status_code})")
+    except Exception as e:
+        print(f"Failed to post heartbeat: {e}")
 
 def run_scraper():
     seen_ids = load_seen()
@@ -110,6 +126,7 @@ def run_scraper():
                     if not title or len(title) < 4:
                         continue
 
+                    # Extract job ID numbers
                     id_match = re.search(r"\d{5,}", href)
                     jid = id_match.group(0) if id_match else href
 
@@ -133,24 +150,28 @@ def run_scraper():
 
         browser.close()
 
-    # Dispatch alerts to Discord
-    for job in new_jobs:
-        payload = {
-            "embeds": [{
-                "title": f"{job['type']}: {job['title']}",
-                "url": job["url"],
-                "description": f"🏫 **District:** {job['district']}",
-                "color": 3447003 if "Science" in job["type"] else 15844367
-            }]
-        }
-        try:
-            requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=10)
-            print(f"Discord alert dispatched: {job['title']}")
-        except Exception as e:
-            print(f"Discord error: {e}")
+    # Dispatch alerts to the primary Discord channel
+    if DISCORD_WEBHOOK_URL:
+        for job in new_jobs:
+            payload = {
+                "embeds": [{
+                    "title": f"{job['type']}: {job['title']}",
+                    "url": job["url"],
+                    "description": f"🏫 **District:** {job['district']}",
+                    "color": 3447003 if "Science" in job["type"] else 15844367
+                }]
+            }
+            try:
+                requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=10)
+                print(f"Alert dispatched: {job['title']}")
+            except Exception as e:
+                print(f"Discord dispatch error: {e}")
 
     save_seen(seen_ids)
-    print(f"Scan complete. Delivered {len(new_jobs)} notifications.")
+    print(f"Scan complete. Alerted {len(new_jobs)} positions.")
+
+    # Send heartbeat status ping
+    send_heartbeat(len(new_jobs))
 
 if __name__ == "__main__":
     run_scraper()
