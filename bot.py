@@ -51,43 +51,69 @@ def is_match(title):
 
     return True
 
-# Named EDJOIN vanity portal URLs for districts on the Peninsula
-DISTRICT_PAGES = [
-    # San Mateo County (High Schools & Unified)
-    "https://www.edjoin.org/sequhsd",         # Sequoia Union High School District (Menlo Park / Redwood City / San Carlos)
-    "https://www.edjoin.org/smuhsd",      # San Mateo Union High School District (San Mateo / Burlingame / Aragon / Hillsdale)
-    "https://www.edjoin.org/juhsd",       # Jefferson Union High School District (Daly City / Pacifica)
-    "https://www.edjoin.org/cabrillo",    # Cabrillo Unified (Half Moon Bay / Coastside)
-    "https://www.edjoin.org/ssfusd",      # South San Francisco Unified
-    "https://www.edjoin.org/smcoe",       # San Mateo County Office of Education
+def get_san_mateo_district_urls():
+    """
+    Scrapes EDJOIN's Region/County directory to find all authentic
+    district job URLs under San Mateo County.
+    """
+    district_urls = set()
+    
+    # Direct EDJOIN vanity/county portal for San Mateo
+    county_portal_urls = [
+        "https://www.edjoin.org/sequhsd",  # Verified Sequoia Union High School District
+        "https://www.edjoin.org/pausd",    # Palo Alto Unified (Next to 94025)
+    ]
+    for url in county_portal_urls:
+        district_urls.add(url)
 
-    # Immediate Neighbors (Bordering 94025 / Silicon Valley)
-    "https://www.edjoin.org/pausd",       # Palo Alto Unified (Directly adjacent to Menlo Park 94025)
-    "https://www.edjoin.org/mvla",        # Mountain View-Los Altos High School District
-    "https://www.edjoin.org/fuhsd",       # Fremont Union High School District (Cupertino / Sunnyvale)
-]
+    # Let's inspect EDJOIN's Region list page for San Mateo
+    region_urls = [
+        "https://www.edjoin.org/Home/RegionDistricts?regionID=41",
+        "https://www.edjoin.org/Home/DistrictsInCounty?county=San%20Mateo"
+    ]
+
+    for r_url in region_urls:
+        try:
+            res = requests.get(r_url, headers=HEADERS, timeout=12)
+            if res.status_code == 200:
+                soup = BeautifulSoup(res.text, "html.parser")
+                # Collect all district links listed on the county page
+                for a in soup.select("a[href]"):
+                    href = a.get("href", "")
+                    text = a.get_text(strip=True).lower()
+                    
+                    # Match links that point to districts or EDJOIN district portals
+                    if any(term in text for term in ["union high", "unified", "sequoia", "san mateo", "jefferson", "cabrillo"]):
+                        full_link = f"https://www.edjoin.org{href}" if href.startswith("/") else href
+                        district_urls.add(full_link)
+        except Exception as e:
+            print(f"Error fetching directory {r_url}: {e}")
+
+    return list(district_urls)
 
 def scrape_districts():
     seen_ids = load_seen()
     new_jobs = []
 
-    print(f"Checking {len(DISTRICT_PAGES)} targeted Peninsula districts...")
+    district_urls = get_san_mateo_district_urls()
+    print(f"Scanning {len(district_urls)} district pages: {district_urls}")
 
-    for district_url in DISTRICT_PAGES:
+    for district_url in district_urls:
         try:
+            print(f"Checking: {district_url}")
             r = requests.get(district_url, headers=HEADERS, timeout=12)
             if r.status_code != 200:
-                print(f"Skipping {district_url} (status: {r.status_code})")
+                print(f"Skipping {district_url} - status {r.status_code}")
                 continue
 
             soup = BeautifulSoup(r.text, "html.parser")
             
-            # Extract district name from header
-            district_name = soup.find("h1") or soup.find("title")
-            d_name = district_name.get_text(strip=True) if district_name else "Peninsula District"
-            d_name = re.sub(r"EDJOIN.*", "", d_name).strip()
+            # Find district name from page header
+            d_header = soup.find("h1") or soup.find("title")
+            district_name = d_header.get_text(strip=True) if d_header else "District"
+            district_name = re.sub(r"EDJOIN.*", "", district_name).strip()
 
-            # Find all job links on this district's portal
+            # Find all job links
             job_links = soup.select("a[href*='JobPosting'], a[href*='jobPosting']")
 
             for a in job_links:
@@ -108,16 +134,16 @@ def scrape_districts():
                     seen_ids.add(jid)
                     new_jobs.append({
                         "title": title,
-                        "district": d_name,
+                        "district": district_name,
                         "url": full_url
                     })
 
             time.sleep(0.5)
 
         except Exception as e:
-            print(f"Error checking {district_url}: {e}")
+            print(f"Error reading {district_url}: {e}")
 
-    # Dispatch alerts to Discord
+    # Send alerts to Discord
     for job in new_jobs:
         payload = {
             "embeds": [{
@@ -131,7 +157,7 @@ def scrape_districts():
         print(f"Alert sent: {job['title']} ({job['district']})")
 
     save_seen(seen_ids)
-    print(f"Scan finished. Sent {len(new_jobs)} alerts.")
+    print(f"Run completed. Total new notifications sent: {len(new_jobs)}")
 
 if __name__ == "__main__":
     scrape_districts()
