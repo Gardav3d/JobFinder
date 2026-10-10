@@ -9,22 +9,20 @@ from urllib.parse import urljoin
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 DB_FILE = "seen_jobs.json"
 
-# Science and teaching roles
+# Science teaching roles
 TEACHING_KEYWORDS = [
     "biology", "bio", "chemistry", "chem",
     "environmental science", "apes", "life science", 
-    "physical science", "science"
+    "physical science", "science teacher"
 ]
 
-# Aide and paraprofessional roles
+# Aide / associate / paraprofessional roles
 AIDE_KEYWORDS = [
-    "aide", "instructional assistant", "paraeducator", 
-    "paraprofessional", "instructional aide", "lab tech", 
-    "science tech", "classroom assistant", "para educator"
+    "aide", "instructional", "associate", 
+    "paraeducator", "para educator", "paraprofessional", 
+    "lab tech", "science tech", "campus security aide", 
+    "supervision aide"
 ]
-
-# Exclude only if explicitly preschool or kindergarten without high school context
-EXCLUDE_KEYWORDS = ["kindergarten", "preschool", "infant", "toddler"]
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -44,77 +42,78 @@ def save_seen(seen_ids):
     with open(DB_FILE, "w") as f:
         json.dump(list(seen_ids), f, indent=2)
 
-def is_match(title, text=""):
-    combined = f"{title} {text}".lower()
+def is_match(title):
+    t = title.lower()
+    
+    # Check if title matches teaching keywords
+    for kw in TEACHING_KEYWORDS:
+        if kw in t:
+            return True
 
-    has_science = any(re.search(r"\b" + re.escape(kw) + r"\b", combined) for kw in TEACHING_KEYWORDS)
-    has_aide = any(re.search(r"\b" + re.escape(kw) + r"\b", combined) for kw in AIDE_KEYWORDS)
+    # Check if title matches aide/associate keywords
+    for kw in AIDE_KEYWORDS:
+        if kw in t:
+            return True
 
-    if not (has_science or has_aide):
-        return False
+    return False
 
-    if any(ex in combined for ex in EXCLUDE_KEYWORDS) and "high school" not in combined:
-        return False
-
-    return True
-
-# Comprehensive roster across San Mateo County and northern Santa Clara County
-# All set to catID=0 to include teaching, aides, classified, and certificated
+# Clean URLs without broken query strings
 DISTRICT_ROSTER = [
-    # --- SAN MATEO COUNTY: High School & Unified Districts ---
-    ("Sequoia Union High School District (Menlo Park 94025)", "https://www.edjoin.org/sequhsd?catID=0"),
-    ("San Mateo Union High School District", "https://www.edjoin.org/SanMateoUnion?catID=0"),
-    ("Jefferson Union High School District", "https://www.edjoin.org/juhsd?catID=0"),
-    ("Cabrillo Unified School District", "https://www.edjoin.org/cabrillo?catID=0"),
-    ("South San Francisco Unified School District", "https://www.edjoin.org/ssfusd?catID=0"),
-    ("San Mateo County Office of Education (SMCOE)", "https://www.edjoin.org/SMCOE?catID=0"),
-    ("San Mateo County Office of Education (Classified)", "https://www.edjoin.org/SMCOE-PC?catID=0"),
+    # High School & Unified Districts (SF to SJ Corridor)
+    ("Sequoia Union High School District (Menlo Park 94025)", "https://www.edjoin.org/sequhsd"),
+    ("San Mateo Union High School District", "https://www.edjoin.org/SanMateoUnion"),
+    ("Palo Alto Unified School District", "https://www.edjoin.org/pausd"),
+    ("Mountain View-Los Altos High School District", "https://www.edjoin.org/mvla"),
+    ("Fremont Union High School District", "https://www.edjoin.org/fuhsd"),
+    ("Jefferson Union High School District", "https://www.edjoin.org/juhsd"),
+    ("Cabrillo Unified School District", "https://www.edjoin.org/cabrillo"),
+    ("South San Francisco Unified", "https://www.edjoin.org/ssfusd"),
+    ("San Mateo County Office of Education", "https://www.edjoin.org/SMCOE"),
+    ("San Mateo County Office of Ed (Classified)", "https://www.edjoin.org/SMCOE-PC"),
 
-    # --- SAN MATEO COUNTY: K-8 Districts (Heavy Aide/Paraeducator Postings) ---
-    ("San Mateo-Foster City School District", "https://www.edjoin.org/SanMateoFoster?catID=0"),
-    ("Redwood City School District", "https://www.edjoin.org/rcsd?catID=0"),
-    ("Belmont-Redwood Shores School District", "https://www.edjoin.org/brssd?catID=0"),
-    ("San Carlos School District", "https://www.edjoin.org/scsdk8?catID=0"),
-    ("Menlo Park City School District", "https://www.edjoin.org/mpcsd?catID=0"),
-    ("Las Lomitas Elementary School District", "https://www.edjoin.org/llesd?catID=0"),
-    ("Ravenswood City School District", "https://www.edjoin.org/rcsdca?catID=0"),
-    ("Burlingame School District", "https://www.edjoin.org/bsd?catID=0"),
-    ("Millbrae Elementary School District", "https://www.edjoin.org/MESD?catID=0"),
-    ("San Bruno Park School District", "https://www.edjoin.org/sbpsd?catID=0"),
-    ("Pacifica School District", "https://www.edjoin.org/pacificasd?catID=0"),
-    ("Jefferson Elementary School District", "https://www.edjoin.org/jesd?catID=0"),
-    ("Portola Valley School District", "https://www.edjoin.org/pvsd?catID=0"),
-    ("Woodside Elementary School District", "https://www.edjoin.org/woodside?catID=0"),
-    ("Brisbane School District", "https://www.edjoin.org/brisbanesd?catID=0"),
-    ("Bayshore Elementary School District", "https://www.edjoin.org/bayshore?catID=0"),
+    # Elementary & Middle Districts (High Volume Aide Postings)
+    ("San Mateo-Foster City School District", "https://www.edjoin.org/SanMateoFoster"),
+    ("Redwood City School District", "https://www.edjoin.org/rcsd"),
+    ("Belmont-Redwood Shores School District", "https://www.edjoin.org/brssd"),
+    ("San Carlos School District", "https://www.edjoin.org/scsdk8"),
+    ("Menlo Park City School District", "https://www.edjoin.org/mpcsd"),
+    ("Las Lomitas Elementary School District", "https://www.edjoin.org/llesd"),
+    ("Ravenswood City School District", "https://www.edjoin.org/rcsdca"),
+    ("Burlingame School District", "https://www.edjoin.org/bsd"),
+    ("Millbrae Elementary School District", "https://www.edjoin.org/MESD"),
+    ("San Bruno Park School District", "https://www.edjoin.org/sbpsd"),
+    ("Pacifica School District", "https://www.edjoin.org/pacificasd"),
+    ("Jefferson Elementary School District", "https://www.edjoin.org/jesd"),
+    ("Portola Valley School District", "https://www.edjoin.org/pvsd"),
+    ("Woodside Elementary School District", "https://www.edjoin.org/woodside"),
 
-    # --- SANTA CLARA COUNTY: Neighboring West Coast Districts (Palo Alto to San Jose) ---
-    ("Palo Alto Unified School District (Directly borders 94025)", "https://www.edjoin.org/pausd?catID=0"),
-    ("Mountain View-Los Altos High School District", "https://www.edjoin.org/mvla?catID=0"),
-    ("Mountain View Whisman School District", "https://www.edjoin.org/mvwsd?catID=0"),
-    ("Fremont Union High School District (Sunnyvale/Cupertino)", "https://www.edjoin.org/fuhsd?catID=0"),
-    ("Cupertino Union School District", "https://www.edjoin.org/cusd?catID=0"),
-    ("Sunnyvale School District", "https://www.edjoin.org/sesd?catID=0"),
-    ("Santa Clara Unified School District", "https://www.edjoin.org/scusd?catID=0"),
-    ("Campbell Union High School District", "https://www.edjoin.org/cuhsd?catID=0"),
-    ("East Side Union High School District", "https://www.edjoin.org/esuhsd?catID=0"),
-    ("San Jose Unified School District", "https://www.edjoin.org/sjusd?catID=0"),
+    # Neighboring Santa Clara Districts
+    ("Cupertino Union School District", "https://www.edjoin.org/cusd"),
+    ("Sunnyvale School District", "https://www.edjoin.org/sesd"),
+    ("Santa Clara Unified School District", "https://www.edjoin.org/scusd"),
+    ("Campbell Union High School District", "https://www.edjoin.org/cuhsd"),
+    ("East Side Union High School District", "https://www.edjoin.org/esuhsd"),
+    ("San Jose Unified School District", "https://www.edjoin.org/sjusd"),
 ]
 
 def scrape_all():
     seen_ids = load_seen()
-    print(f"Beginning crawl of {len(DISTRICT_ROSTER)} district portals across San Mateo & Santa Clara counties...")
+    print(f"Beginning crawl of {len(DISTRICT_ROSTER)} district portals...")
 
     new_jobs = []
 
     for district_name, district_url in DISTRICT_ROSTER:
         try:
-            resp = requests.get(district_url, headers=HEADERS, timeout=10)
+            resp = requests.get(district_url, headers=HEADERS, timeout=12)
             if resp.status_code != 200:
+                print(f"Skipping {district_name}: HTTP {resp.status_code}")
                 continue
 
             soup = BeautifulSoup(resp.text, "html.parser")
-            job_links = soup.select("a[href*='JobPosting'], a[href*='jobPosting']")
+            
+            # Catch all links pointing to a job posting
+            job_links = soup.find_all("a", href=re.compile(r"JobPosting", re.IGNORECASE))
+            print(f"[{district_name}] found {len(job_links)} total postings.")
 
             for a in job_links:
                 title = a.get_text(strip=True)
@@ -129,9 +128,7 @@ def scrape_all():
                 if jid in seen_ids:
                     continue
 
-                parent_text = a.parent.get_text(" ", strip=True) if a.parent else ""
-
-                if is_match(title, parent_text):
+                if is_match(title):
                     full_url = urljoin("https://www.edjoin.org", href)
                     seen_ids.add(jid)
                     new_jobs.append({
@@ -139,30 +136,31 @@ def scrape_all():
                         "district": district_name,
                         "url": full_url
                     })
+                    print(f"--> MATCH FOUND: {title}")
 
             time.sleep(0.3)
 
         except Exception as e:
             print(f"Error checking {district_name}: {e}")
 
-    # Dispatch alerts to Discord
+    # Dispatch to Discord
     for job in new_jobs:
         payload = {
             "embeds": [{
                 "title": f"📋 {job['title']}",
                 "url": job["url"],
-                "description": f"🏫 **District:** {job['district']}\n🏷️ **Category:** All Categories (catID=0)",
+                "description": f"🏫 **District:** {job['district']}",
                 "color": 3066993
             }]
         }
         try:
             requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=10)
-            print(f"Alert sent: {job['title']} ({job['district']})")
+            print(f"Alert sent to Discord: {job['title']}")
         except Exception as e:
             print(f"Discord dispatch error: {e}")
 
     save_seen(seen_ids)
-    print(f"Scan complete. Alerted {len(new_jobs)} positions.")
+    print(f"Finished run. Sent {len(new_jobs)} notifications.")
 
 if __name__ == "__main__":
     scrape_all()
