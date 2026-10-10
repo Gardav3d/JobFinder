@@ -9,7 +9,7 @@ DB_FILE = "seen_jobs.json"
 # Science keywords for your father
 TARGET_KEYWORDS = [
     "biology", "bio", "chemistry", "chem",
-    "environmental science", "apes", "life science", "physical science", "aid"
+    "environmental science", "apes", "life science", "physical science", "math"
 ]
 
 # Ensure it's secondary / high school
