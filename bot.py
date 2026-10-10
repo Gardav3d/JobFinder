@@ -2,31 +2,41 @@ import json
 import os
 import re
 import requests
+from urllib.parse import urljoin
+from playwright.sync_api import sync_playwright
 
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 DB_FILE = "seen_jobs.json"
 
-# Science keywords
+# Science and teaching roles
 TEACHING_KEYWORDS = [
     "biology", "bio", "chemistry", "chem",
     "environmental science", "apes", "life science", 
-    "physical science", "science teacher"
+    "physical science", "science"
 ]
 
-# Aide / associate keywords
+# Aide and paraprofessional roles
 AIDE_KEYWORDS = [
     "aide", "instructional", "associate", 
     "paraeducator", "para educator", "paraprofessional", 
-    "lab tech", "science tech", "supervision aide"
+    "lab tech", "science tech", "supervision"
 ]
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Accept": "application/json, text/javascript, */*; q=0.01",
-    "Content-Type": "application/json; charset=UTF-8",
-    "X-Requested-With": "XMLHttpRequest",
-    "Referer": "https://www.edjoin.org/"
-}
+# Key target districts covering Menlo Park (94025), San Mateo County, and North Santa Clara
+DISTRICT_URLS = [
+    ("Sequoia Union High School District (Menlo Park 94025)", "https://www.edjoin.org/sequhsd"),
+    ("San Mateo Union High School District", "https://www.edjoin.org/SanMateoUnion"),
+    ("Palo Alto Unified School District", "https://www.edjoin.org/pausd"),
+    ("Mountain View-Los Altos High School District", "https://www.edjoin.org/mvla"),
+    ("Fremont Union High School District", "https://www.edjoin.org/fuhsd"),
+    ("San Mateo-Foster City School District", "https://www.edjoin.org/SanMateoFoster"),
+    ("Redwood City School District", "https://www.edjoin.org/rcsd"),
+    ("Belmont-Redwood Shores School District", "https://www.edjoin.org/brssd"),
+    ("Menlo Park City School District", "https://www.edjoin.org/mpcsd"),
+    ("Jefferson Union High School District", "https://www.edjoin.org/juhsd"),
+    ("Cabrillo Unified School District", "https://www.edjoin.org/cabrillo"),
+    ("San Mateo County Office of Education", "https://www.edjoin.org/SMCOE"),
+]
 
 def load_seen():
     if os.path.exists(DB_FILE):
@@ -51,89 +61,57 @@ def is_match(title):
             return True
     return False
 
-def scrape_edjoin_api():
+def run_scraper():
     seen_ids = load_seen()
     new_jobs = []
 
-    # EDJOIN API endpoint used by the frontend search interface
-    api_url = "https://www.edjoin.org/Home/LoadJobs"
-    
-    # Counties: 41 = San Mateo County, 43 = Santa Clara County
-    # catID = 0 (All Categories)
-    target_counties = [
-        ("San Mateo County", 41),
-        ("Santa Clara County", 43)
-    ]
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        )
+        page = context.new_page()
 
-    for county_name, county_id in target_counties:
-        print(f"Querying EDJOIN backend for {county_name} (ID: {county_id})...")
+        for district_name, url in DISTRICT_URLS:
+            print(f"Opening: {district_name}...")
+            try:
+                page.goto(url, wait_until="networkidle", timeout=30000)
+                
+                # Give dynamic rows a brief moment to finish populating
+                page.wait_for_timeout(2000)
 
-        # Payload matching EDJOIN's AJAX request
-        payload = {
-            "keywords": "",
-            "location": "",
-            "searchType": "all",
-            "countyID": county_id,
-            "regionID": 0,
-            "districtID": 0,
-            "catID": 0,
-            "page": 1,
-            "pageSize": 100,  # Grab up to 100 most recent postings
-            "sort": "postingDate",
-            "order": "DESC"
-        }
+                # Locate all links pointing to JobPostings
+                job_elements = page.locator("a[href*='JobPosting'], a[href*='jobPosting']").all()
+                print(f"[{district_name}] Rendered {len(job_elements)} job links.")
 
-        try:
-            resp = requests.post(api_url, json=payload, headers=HEADERS, timeout=15)
-            
-            # If the JSON endpoint returned HTML or rejected the format, fall back to form-encoded
-            if resp.status_code != 200 or not resp.text.strip().startswith(("{", "[")):
-                resp = requests.post(
-                    api_url, 
-                    data={
-                        "countyID": county_id,
-                        "catID": 0,
-                        "sort": "postingDate",
-                        "order": "DESC",
-                        "pageSize": 100
-                    },
-                    headers={**HEADERS, "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"},
-                    timeout=15
-                )
+                for elem in job_elements:
+                    title = elem.inner_text().strip()
+                    href = elem.get_attribute("href") or ""
 
-            data = resp.json()
-            # Handle different JSON structures returned by EDJOIN
-            job_list = data.get("data") or data.get("Jobs") or data.get("rows") or []
-            if isinstance(data, list):
-                job_list = data
+                    if not title or len(title) < 4:
+                        continue
 
-            print(f"[{county_name}] API returned {len(job_list)} live job records.")
+                    # Extract the unique numerical Job ID
+                    id_match = re.search(r"\d{5,}", href)
+                    jid = id_match.group(0) if id_match else href
 
-            for job in job_list:
-                # Extract fields across possible EDJOIN schema keys
-                title = job.get("JobTitle") or job.get("title") or job.get("PositionTitle") or ""
-                jid = str(job.get("PostingId") or job.get("JobPostingId") or job.get("id") or "")
-                district = job.get("DistrictName") or job.get("Employer") or county_name
-                url_slug = job.get("PostingUrl") or job.get("url") or f"/Home/JobPosting/{jid}"
+                    if jid in seen_ids:
+                        continue
 
-                if not title or not jid:
-                    continue
+                    if is_match(title):
+                        full_url = urljoin("https://www.edjoin.org", href)
+                        seen_ids.add(jid)
+                        new_jobs.append({
+                            "title": title,
+                            "district": district_name,
+                            "url": full_url
+                        })
+                        print(f"--> MATCH FOUND: {title}")
 
-                if jid in seen_ids:
-                    continue
+            except Exception as e:
+                print(f"Failed to process {district_name}: {e}")
 
-                if is_match(title):
-                    full_url = f"https://www.edjoin.org{url_slug}" if url_slug.startswith("/") else url_slug
-                    seen_ids.add(jid)
-                    new_jobs.append({
-                        "title": title,
-                        "district": district,
-                        "url": full_url
-                    })
-                    print(f"--> MATCH FOUND: {title} ({district})")
-
-        except Exception as e:
-            print(f"API query failed for {county_name}: {e}")
+        browser.close()
 
     # Dispatch alerts to Discord
     for job in new_jobs:
@@ -141,18 +119,18 @@ def scrape_edjoin_api():
             "embeds": [{
                 "title": f"📋 {job['title']}",
                 "url": job["url"],
-                "description": f"🏫 **District:** {job['district']}\n🏷️ **Category:** All (catID=0)",
+                "description": f"🏫 **District:** {job['district']}",
                 "color": 3066993
             }]
         }
         try:
             requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=10)
-            print(f"Alert sent to Discord: {job['title']}")
+            print(f"Discord alert dispatched: {job['title']}")
         except Exception as e:
-            print(f"Discord dispatch error: {e}")
+            print(f"Discord error: {e}")
 
     save_seen(seen_ids)
-    print(f"Finished run. Sent {len(new_jobs)} notifications.")
+    print(f"Scan complete. Delivered {len(new_jobs)} notifications.")
 
 if __name__ == "__main__":
-    scrape_edjoin_api()
+    run_scraper()
