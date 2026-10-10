@@ -1,0 +1,28 @@
+name: Check EDJOIN Jobs
+
+on:
+  schedule:
+    # Runs every 2 hours between 6 AM and 8 PM Pacific Time
+    - cron: '0 14-23/2,0-4/2 * * *'
+  workflow_dispatch: # Allows manual trigger
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests beautifulsoup4
+      - run: python bot.py
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      - name: Commit seen jobs
+        run: |
+          git config --global user.name "edjoin-bot"
+          git config --global user.email "bot@github.com"
+          git add seen_jobs.json
+          git commit -m "Update seen jobs" || exit 0
+          git push
